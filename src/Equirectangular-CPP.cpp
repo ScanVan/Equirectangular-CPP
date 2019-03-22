@@ -29,6 +29,7 @@ public:
 	std::string CalPath1 { "./" };
 	std::string EquiOutputPath { "./" };
 	bool FlipLR { true };
+	bool FlipCameras { false };
 	int StartIdx { 0 };
 	FileConfig(std::string s) :
 			ConfigFilePath(s) {
@@ -78,14 +79,20 @@ void ProcessConfigFile(FileConfig &FC) {
 		std::string trimmedLine = trim(line);
 		if (trimmedLine == "")
 			continue;
+
+		// Ignore lines starting with hash symbol
 		const auto strHash = trimmedLine.find_first_of("#");
 		if (strHash == 0)
 			continue;
+
+		// Extract the command and the argument separated by the symbol "="
 		const auto strEqual = trimmedLine.find_first_of("=");
 		std::string command = ToUpper(trim(trimmedLine.substr(0, strEqual)));
 		std::string argument = trim(trimmedLine.substr(strEqual + 1));
 
+		// Check for commands
 		if (command == "RAW_INPUT_PATH") {
+			// Path of the input files where the raw and txt files and are placed
 			if (argument != "") {
 				fs::path p = argument;
 				if (!fs::exists(p)) {
@@ -96,6 +103,7 @@ void ProcessConfigFile(FileConfig &FC) {
 				throw(std::runtime_error("Error: RAW_INPUT_PATH parameter is empty."));
 			}
 		} else if (command == "CAL_0_PATH") {
+			// Path to the calibration data for camera 0
 			if (argument != "") {
 				fs::path p = argument;
 				if (!fs::exists(p)) {
@@ -106,6 +114,7 @@ void ProcessConfigFile(FileConfig &FC) {
 				throw(std::runtime_error("Error: CAL_PATH parameter is empty."));
 			}
 		} else if (command == "CAL_1_PATH") {
+			// Path to the calibration data for camera 1
 			if (argument != "") {
 				fs::path p = argument;
 				if (!fs::exists(p)) {
@@ -116,6 +125,7 @@ void ProcessConfigFile(FileConfig &FC) {
 				throw(std::runtime_error("Error: CAL_PATH parameter is empty."));
 			}
 		} else if (command == "EQUI_OUTPUT_PATH") {
+			// Output path where the equirectangular images are saved
 			if (argument != "") {
 				fs::path p = argument;
 				if (!fs::exists(p)) {
@@ -127,6 +137,7 @@ void ProcessConfigFile(FileConfig &FC) {
 				throw(std::runtime_error("Error: EQUI_OUTPUT_PATH parameter is empty."));
 			}
 		} else if (command == "FLIP_LR") {
+			// Flips each of the images
 			if (argument != "") {
 				argument = ToUpper(argument);
 				if (argument == "FALSE") {
@@ -140,8 +151,9 @@ void ProcessConfigFile(FileConfig &FC) {
 				throw(std::runtime_error("Error: FLIP_LR parameter is empty."));
 			}
 		}
-
 		else if (command == "START_IDX") {
+			// This is to indicate the starting index for processing the files
+			// in case the process was interrupted
 			if (argument != "") {
 				try {
 					FC.StartIdx = stoi(argument);
@@ -152,17 +164,33 @@ void ProcessConfigFile(FileConfig &FC) {
 				throw(std::runtime_error("Error: START_IDX parameter is empty."));
 			}
 		}
-
+		else if (command == "FLIP_CAMERAS") {
+			// Swaps the camera images (between camera 0 and camera 1)
+			if (argument != "") {
+				argument = ToUpper(argument);
+				if (argument == "FALSE") {
+					FC.FlipCameras = false;
+				} else if (argument == "TRUE") {
+					FC.FlipCameras = true;
+				} else {
+					throw(std::runtime_error("Error: invalid argument for FLIP_CAMERAS parameter."));
+				}
+			} else {
+				throw(std::runtime_error("Error: START_IDX parameter is empty."));
+			}
+		}
 	}
 }
 
 cv::Mat raw2bmp(std::string imageName) {
+// Converts from raw data to opencv format
 
 	cv::Mat openCvImageRG8;
 	cv::Mat openCvImage;
 
 	std::ifstream myFile(imageName, std::ios::in | std::ios::binary);
 	if (myFile) {
+
 		// get length of the file:
 		myFile.seekg(0, myFile.end);
 		int length = myFile.tellg();
@@ -173,6 +201,7 @@ cv::Mat raw2bmp(std::string imageName) {
 
 		if (myFile) {
 
+			// Assumes that the images are squares
 			int imageHeight = sqrt(length);
 			if (imageHeight * imageHeight != length) {
 				throw(std::runtime_error("Error in the dimension of the buffer size."));
@@ -197,17 +226,23 @@ cv::Mat raw2bmp(std::string imageName) {
 }
 
 std::string extractTime (std::string txtPath) {
+// This extracts the time stamp from the txt file
+// It generates a string of the format 20190319-103444-344878 (year(4)month(2)day(2)-hour(2)minutes(2)second(2)-millisecond(3)microsecond(3))
+// Input format is: "Capture Time CPU: 2019-03-19 10:34:41:594:897"
 
 	std::ifstream f(txtPath);
 	if (!f.good()) {
 		throw(std::runtime_error("Cannot open file " + txtPath + ""));
 	}
+
 	int i { 0 };
 	std::string line {};
+	// The time information is in the 5th line
 	while (f.good() && i < 5) {
 		std::getline(f, line);
 		i++;
 	}
+
 	std::stringstream ss { };
 	const auto strColon = line.find_first_of(":");
 	const auto strDash1 = line.find_first_of("-");
@@ -242,14 +277,21 @@ std::string extractTime (std::string txtPath) {
 }
 
 void ConvertImages (FileConfig &FC) {
+// Performs the conversion of the images
 
+	// Stores the set of indices to process
 	std::set<int> imgnums { };
+
 	// Scans all the files from the input folder
 	fs::path p = FC.RawInputPath;
+
+	// Stores all the file names as a vector of strings
 	std::vector<std::string> lf { };
 	for (auto &f : fs::directory_iterator(p)) {
 		lf.push_back(f.path());
 	}
+
+	// Extracts the image numbers from the files and stores in the set
 	for (auto &x : lf) {
 		const auto posUnderscore = x.find_last_of("_");
 		const auto posDot = x.find_last_of(".");
@@ -257,12 +299,15 @@ void ConvertImages (FileConfig &FC) {
 		try {
 			imgnums.insert(stoi(number));
 		} catch (...) {
-
+			// some files does not contain numbers, like gps.txt
+			// ignore them
 		}
 	}
 
+	// Report the total number of files to process
 	std::cout << "Number of images in the folder: " << imgnums.size() << std::endl;
 
+	// Read the calibration data
 	cv::Mat map_0_1;
 	fs::path p0_1 = fs::path(FC.CalPath0) / std::string("map1.xml");
 	cv::FileStorage file_0_1(p0_1.string(), cv::FileStorage::READ);
@@ -291,60 +336,79 @@ void ConvertImages (FileConfig &FC) {
 	file_1_2.release();
 	std::cout << "Read " << p1_2 << std::endl;
 
-
 	// Process for all the image numbers
 	for (auto &n : imgnums) {
 
+		// Skips the index numbers lower than the parameter START_IDX
 		if (n < FC.StartIdx) continue;
 
+		// Format the strings to match the file names
 		std::string img0Name = "0_" + std::to_string(n) + ".raw";
 		std::string img1Name = "1_" + std::to_string(n) + ".raw";
 		std::string img0TxtName = "img_0_" + std::to_string(n) + ".txt";
 		std::string img1TxtName = "img_1_" + std::to_string(n) + ".txt";
 
+		// Path to the image files
 		fs::path pathImg0 = p / img0Name;
 		fs::path pathImg1 = p / img1Name;
-
+		// Path to the associated text file
 		fs::path pathTxt0 = p / img0TxtName;
 
+		// Extract the time information from txt file
 		std::string imgTime0 = extractTime (pathTxt0.string());
 
+		// Name of the output equirectangular image
 		std::string imgEquiName = imgTime0 + ".bmp";
 
-		//std::cout << pathImg0 << std::endl;
 
+		// Transformation to equirectangular images
 		cv::Mat distorted_0 {};
+		// Converts from raw to opencv
 		distorted_0 = raw2bmp(pathImg0.string());
 		cv::Mat distorted_1 {};
+		// Converts from raw to opencv
 		distorted_1 = raw2bmp(pathImg1.string());
 
+		// Equirectangular image 0
 		cv::Mat undistorted_0{};
 
 		// main remapping function that undistort the images
 		cv::remap(distorted_0, undistorted_0, map_0_1, map_0_2, cv::INTER_CUBIC, cv::BORDER_CONSTANT);
 
 		if (FC.FlipLR) {
+		// If FLIP_LR is true flip the image
 			flip(undistorted_0, undistorted_0, +1);
 		}
 
+		// Equirectangular image 1
 		cv::Mat undistorted_1 {};
 
 		// main remapping function that undistort the images
 		cv::remap(distorted_1, undistorted_1, map_1_1, map_1_2, cv::INTER_CUBIC, cv::BORDER_CONSTANT);
 
 		if (FC.FlipLR) {
+		// If FLIP_LR is true flip the image
 			flip(undistorted_1, undistorted_1, +1);
 		}
 
+		// Concatenated equirectnagular image
 		cv::Mat undistorted_0_1;
 
-		cv::hconcat(undistorted_0, undistorted_1, undistorted_0_1);
+		if (FC.FlipCameras) {
+		// If FlipCameras is true, swaps the camera images, left image is camera 1 and right image is camera 0
+			cv::hconcat(undistorted_1, undistorted_0, undistorted_0_1);
+		} else {
+		// Else left image is from camera 0 and right image is from camera 1
+			cv::hconcat(undistorted_0, undistorted_1, undistorted_0_1);
+		}
 
+		// Path of the output image
 		fs::path pathOut = fs::path(FC.EquiOutputPath) / imgEquiName;
 
 		//save images into file
 		imwrite(pathOut.string(), undistorted_0_1);
 
+		// Print progress
 		std::cout << n << " " << std::flush;
 
 	}
