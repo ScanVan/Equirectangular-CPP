@@ -23,17 +23,22 @@ namespace fs = std::experimental::filesystem;
 
 class FileConfig {
 public:
-	std::string ConfigFilePath {"./"};
-	std::string RawInputPath {"./"};
-	std::string CalPath0 {"./"};
-	std::string CalPath1 {"./"};
-	std::string EquiOutputPath {"./"};
-	FileConfig (std::string s) : ConfigFilePath(s) {}
+	std::string ConfigFilePath { "./" };
+	std::string RawInputPath { "./" };
+	std::string CalPath0 { "./" };
+	std::string CalPath1 { "./" };
+	std::string EquiOutputPath { "./" };
+	bool FlipLR { true };
+	int StartIdx { 0 };
+	FileConfig(std::string s) :
+			ConfigFilePath(s) {
+	}
 
 };
 
-
 std::string trim(const std::string& str, const std::string& whitespace = " \t") {
+// trim white spaces and tabs from the beginning and end
+
 	const auto strBegin = str.find_first_not_of(whitespace);
 	if (strBegin == std::string::npos)
 		return ""; // no content
@@ -44,7 +49,8 @@ std::string trim(const std::string& str, const std::string& whitespace = " \t") 
 	return str.substr(strBegin, strRange);
 }
 
-std::string ToUpper (const std::string &str) {
+std::string ToUpper(const std::string &str) {
+// Convert to upper case the string
 
 	std::locale loc { };
 	std::stringstream ss { };
@@ -55,17 +61,20 @@ std::string ToUpper (const std::string &str) {
 
 void ProcessConfigFile(FileConfig &FC) {
 
+	// open configuration file
 	std::ifstream f(FC.ConfigFilePath);
 
 	if (!f.good()) {
-		throw std::runtime_error("Error opening the configuration file \""+FC.ConfigFilePath+"\".");
+		throw std::runtime_error("Error opening the configuration file \"" + FC.ConfigFilePath + "\".");
 	}
 
+	// process configuration file
 	while (f.good()) {
 
 		std::string line { };
 		std::getline(f, line);
 
+		// remove white spaces from the line
 		std::string trimmedLine = trim(line);
 		if (trimmedLine == "")
 			continue;
@@ -116,6 +125,31 @@ void ProcessConfigFile(FileConfig &FC) {
 				FC.EquiOutputPath = argument;
 			} else {
 				throw(std::runtime_error("Error: EQUI_OUTPUT_PATH parameter is empty."));
+			}
+		} else if (command == "FLIP_LR") {
+			if (argument != "") {
+				argument = ToUpper(argument);
+				if (argument == "FALSE") {
+					FC.FlipLR = false;
+				} else if (argument == "TRUE") {
+					FC.FlipLR = true;
+				} else {
+					throw(std::runtime_error("Error: invalid argument for FLIP_LR parameter."));
+				}
+			} else {
+				throw(std::runtime_error("Error: FLIP_LR parameter is empty."));
+			}
+		}
+
+		else if (command == "START_IDX") {
+			if (argument != "") {
+				try {
+					FC.StartIdx = stoi(argument);
+				} catch (...) {
+					throw(std::runtime_error("Error: argument of START_IDX is not valid."));
+				}
+			} else {
+				throw(std::runtime_error("Error: START_IDX parameter is empty."));
 			}
 		}
 
@@ -260,6 +294,9 @@ void ConvertImages (FileConfig &FC) {
 
 	// Process for all the image numbers
 	for (auto &n : imgnums) {
+
+		if (n < FC.StartIdx) continue;
+
 		std::string img0Name = "0_" + std::to_string(n) + ".raw";
 		std::string img1Name = "1_" + std::to_string(n) + ".raw";
 		std::string img0TxtName = "img_0_" + std::to_string(n) + ".txt";
@@ -286,14 +323,18 @@ void ConvertImages (FileConfig &FC) {
 		// main remapping function that undistort the images
 		cv::remap(distorted_0, undistorted_0, map_0_1, map_0_2, cv::INTER_CUBIC, cv::BORDER_CONSTANT);
 
-		flip (undistorted_0, undistorted_0, +1);
+		if (FC.FlipLR) {
+			flip(undistorted_0, undistorted_0, +1);
+		}
 
 		cv::Mat undistorted_1 {};
 
 		// main remapping function that undistort the images
 		cv::remap(distorted_1, undistorted_1, map_1_1, map_1_2, cv::INTER_CUBIC, cv::BORDER_CONSTANT);
 
-		flip (undistorted_1, undistorted_1, +1);
+		if (FC.FlipLR) {
+			flip(undistorted_1, undistorted_1, +1);
+		}
 
 		cv::Mat undistorted_0_1;
 
@@ -319,10 +360,13 @@ int main(int argc, char* argv[]) {
 
 	std::string cfg = argv[1];
 
+	// Create object File Configuration
 	FileConfig FC{cfg};
 
+	// Process the configuration file
 	ProcessConfigFile (FC);
 
+	// Convert the images
 	ConvertImages(FC);
 
 	return 0;
