@@ -31,6 +31,7 @@ public:
 	bool FlipLR { true };
 	bool FlipCameras { false };
 	int StartIdx { 0 };
+	int StopIdx { 0 };
 	FileConfig(std::string s) :
 			ConfigFilePath(s) {
 	}
@@ -163,7 +164,20 @@ void ProcessConfigFile(FileConfig &FC) {
 			} else {
 				throw(std::runtime_error("Error: START_IDX parameter is empty."));
 			}
+		} else if (command == "STOP_IDX") {
+			// This is to indicate the stopping index for processing the files
+			// in case the process was interrupted
+			if (argument != "") {
+				try {
+					FC.StopIdx = stoi(argument);
+				} catch (...) {
+					throw(std::runtime_error("Error: argument of STOP_IDX is not valid."));
+				}
+			} else {
+				throw(std::runtime_error("Error: STOP_IDX parameter is empty."));
+			}
 		}
+
 		else if (command == "FLIP_CAMERAS") {
 			// Swaps the camera images (between camera 0 and camera 1)
 			if (argument != "") {
@@ -182,11 +196,10 @@ void ProcessConfigFile(FileConfig &FC) {
 	}
 }
 
-cv::Mat raw2bmp(std::string imageName) {
+void raw2bmp(std::string imageName, cv::Mat &openCvImage) {
 // Converts from raw data to opencv format
 
 	cv::Mat openCvImageRG8;
-	cv::Mat openCvImage;
 
 	std::ifstream myFile(imageName, std::ios::in | std::ios::binary);
 	if (myFile) {
@@ -216,13 +229,15 @@ cv::Mat raw2bmp(std::string imageName) {
 			throw(std::runtime_error("Error: only " + std::to_string(myFile.gcount()) + " could be read."));
 		}
 
+		delete[] buffer;
+
 		myFile.close();
 
 	} else {
 		throw(std::runtime_error("Error: file could not be opened."));
 	}
 
-	return openCvImage;
+	openCvImageRG8.release();
 }
 
 std::string extractTime (std::string txtPath) {
@@ -306,6 +321,8 @@ void ConvertImages (FileConfig &FC) {
 
 	// Report the total number of files to process
 	std::cout << "Number of images in the folder: " << imgnums.size() << std::endl;
+	std::cout << "Reading from path: " << FC.RawInputPath << std::endl;
+	std::cout << "Writing to path: " << FC.EquiOutputPath << std::endl;
 
 	// Read the calibration data
 	cv::Mat map_0_1;
@@ -341,6 +358,10 @@ void ConvertImages (FileConfig &FC) {
 
 		// Skips the index numbers lower than the parameter START_IDX
 		if (n < FC.StartIdx) continue;
+		// If n is greater than STOP_IDX breaks
+		if (FC.StopIdx != 0) {
+			if (n > FC.StopIdx) break;
+		}
 
 		// Format the strings to match the file names
 		std::string img0Name = "0_" + std::to_string(n) + ".raw";
@@ -364,16 +385,19 @@ void ConvertImages (FileConfig &FC) {
 		// Transformation to equirectangular images
 		cv::Mat distorted_0 {};
 		// Converts from raw to opencv
-		distorted_0 = raw2bmp(pathImg0.string());
+		raw2bmp(pathImg0.string(), distorted_0);
 		cv::Mat distorted_1 {};
 		// Converts from raw to opencv
-		distorted_1 = raw2bmp(pathImg1.string());
+		raw2bmp(pathImg1.string(), distorted_1);
+
 
 		// Equirectangular image 0
 		cv::Mat undistorted_0{};
 
 		// main remapping function that undistort the images
 		cv::remap(distorted_0, undistorted_0, map_0_1, map_0_2, cv::INTER_CUBIC, cv::BORDER_CONSTANT);
+
+		distorted_0.release();
 
 		if (FC.FlipLR) {
 		// If FLIP_LR is true flip the image
@@ -385,6 +409,8 @@ void ConvertImages (FileConfig &FC) {
 
 		// main remapping function that undistort the images
 		cv::remap(distorted_1, undistorted_1, map_1_1, map_1_2, cv::INTER_CUBIC, cv::BORDER_CONSTANT);
+
+		distorted_1.release();
 
 		if (FC.FlipLR) {
 		// If FLIP_LR is true flip the image
@@ -402,16 +428,23 @@ void ConvertImages (FileConfig &FC) {
 			cv::hconcat(undistorted_0, undistorted_1, undistorted_0_1);
 		}
 
+		undistorted_0.release();
+		undistorted_1.release();
+
 		// Path of the output image
 		fs::path pathOut = fs::path(FC.EquiOutputPath) / imgEquiName;
 
 		//save images into file
 		imwrite(pathOut.string(), undistorted_0_1);
 
+		undistorted_0_1.release();
+
 		// Print progress
 		std::cout << n << " " << std::flush;
 
 	}
+
+	std::cout << std::endl;
 
 }
 
