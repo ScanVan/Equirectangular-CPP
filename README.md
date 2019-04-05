@@ -8,6 +8,7 @@ The usage of the program is the following:
 
 Where config_file.txt is a text file with the following parameters.
 
+```
 # Lines starting with # are comments and will be omitted.
 # Path to the raw data input folder
 RAW_INPUT_PATH = /path_to_raw_data_folder
@@ -26,3 +27,4 @@ START_IDX = 0
 # Stop index. The process will stop after processing index STOP_IDX. If equal to 0,
 # it will process until the end.
 STOP_IDX = 0
+```
