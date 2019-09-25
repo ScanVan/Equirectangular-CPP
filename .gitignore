@@ -31,6 +31,7 @@
 *.out
 *.app
 /Debug/
+build
 
 # Project settings
 *.cproject
